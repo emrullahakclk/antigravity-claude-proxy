@@ -13,7 +13,6 @@ import { TOKEN_REFRESH_INTERVAL_MS, ANTIGRAVITY_AUTH_PORT } from './constants.js
 
 // Cache for the extracted token
 let cachedToken = null;
-let cachedConfig = null;
 let tokenExtractedAt = null;
 
 // Antigravity's SQLite database path
@@ -131,7 +130,6 @@ export async function getToken() {
     if (needsRefresh()) {
         const data = await getTokenData();
         cachedToken = data.apiKey;
-        cachedConfig = data;
         tokenExtractedAt = Date.now();
     }
     return cachedToken;
@@ -142,7 +140,6 @@ export async function getToken() {
  */
 export async function forceRefresh() {
     cachedToken = null;
-    cachedConfig = null;
     tokenExtractedAt = null;
     return getToken();
 }

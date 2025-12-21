@@ -399,7 +399,6 @@ export function convertAnthropicToGoogle(anthropicRequest) {
     const isClaudeModel = modelName.toLowerCase().includes('claude');
     const isClaudeThinkingModel = isClaudeModel && modelName.toLowerCase().includes('thinking');
 
-
     const googleRequest = {
         contents: [],
         generationConfig: {}
@@ -628,7 +627,6 @@ function sanitizeSchema(schema) {
 export function convertGoogleToAnthropic(googleResponse, model) {
     // Handle the response wrapper
     const response = googleResponse.response || googleResponse;
-
 
     const candidates = response.candidates || [];
     const firstCandidate = candidates[0] || {};

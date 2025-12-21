@@ -844,7 +844,6 @@ async function* streamSSEResponse(response, originalModel) {
     yield { type: 'message_stop' };
 }
 
-
 /**
  * List available models
  */
