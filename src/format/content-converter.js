@@ -5,6 +5,7 @@
 
 import { MIN_SIGNATURE_LENGTH, GEMINI_SKIP_SIGNATURE } from '../constants.js';
 import { getCachedSignature } from './signature-cache.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Convert Anthropic role to Google role
@@ -101,7 +102,7 @@ export function convertContentToParts(content, isClaudeModel = false, isGeminiMo
                 if (!signature && block.id) {
                     signature = getCachedSignature(block.id);
                     if (signature) {
-                        console.log('[ContentConverter] Restored signature from cache for:', block.id);
+                        logger.debug(`[ContentConverter] Restored signature from cache for: ${block.id}`);
                     }
                 }
 

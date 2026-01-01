@@ -11,6 +11,7 @@ import {
     ANTIGRAVITY_AUTH_PORT
 } from './constants.js';
 import { getAuthStatus } from './db/database.js';
+import { logger } from './utils/logger.js';
 
 // Cache for the extracted token
 let cachedToken = null;
@@ -55,22 +56,22 @@ async function getTokenData() {
     try {
         const dbData = getAuthStatus();
         if (dbData?.apiKey) {
-            console.log('[Token] Got fresh token from SQLite database');
+            logger.info('[Token] Got fresh token from SQLite database');
             return dbData;
         }
     } catch (err) {
-        console.log('[Token] DB extraction failed, trying HTML page...');
+        logger.warn('[Token] DB extraction failed, trying HTML page...');
     }
 
     // Fallback to HTML page
     try {
         const pageData = await extractChatParams();
         if (pageData?.apiKey) {
-            console.log('[Token] Got token from HTML page (may be stale)');
+            logger.warn('[Token] Got token from HTML page (may be stale)');
             return pageData;
         }
     } catch (err) {
-        console.log('[Token] HTML page extraction failed:', err.message);
+        logger.warn(`[Token] HTML page extraction failed: ${err.message}`);
     }
 
     throw new Error(

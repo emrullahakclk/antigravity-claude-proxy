@@ -20,6 +20,7 @@ import {
 import { refreshAccessToken } from './oauth.js';
 import { formatDuration } from './utils/helpers.js';
 import { getAuthStatus } from './db/database.js';
+import { logger } from './utils/logger.js';
 
 export class AccountManager {
     #accounts = [];
@@ -63,19 +64,19 @@ export class AccountManager {
                 this.#currentIndex = 0;
             }
 
-            console.log(`[AccountManager] Loaded ${this.#accounts.length} account(s) from config`);
+            logger.info(`[AccountManager] Loaded ${this.#accounts.length} account(s) from config`);
 
             // If config exists but has no accounts, fall back to Antigravity database
             if (this.#accounts.length === 0) {
-                console.log('[AccountManager] No accounts in config. Falling back to Antigravity database');
+                logger.warn('[AccountManager] No accounts in config. Falling back to Antigravity database');
                 await this.#loadDefaultAccount();
             }
         } catch (error) {
             if (error.code === 'ENOENT') {
                 // No config file - use single account from Antigravity database
-                console.log('[AccountManager] No config file found. Using Antigravity database (single account mode)');
+                logger.info('[AccountManager] No config file found. Using Antigravity database (single account mode)');
             } else {
-                console.error('[AccountManager] Failed to load config:', error.message);
+                logger.error('[AccountManager] Failed to load config:', error.message);
             }
             // Fall back to default account
             await this.#loadDefaultAccount();
@@ -106,10 +107,10 @@ export class AccountManager {
                     token: authData.apiKey,
                     extractedAt: Date.now()
                 });
-                console.log(`[AccountManager] Loaded default account: ${this.#accounts[0].email}`);
+                logger.info(`[AccountManager] Loaded default account: ${this.#accounts[0].email}`);
             }
         } catch (error) {
-            console.error('[AccountManager] Failed to load default account:', error.message);
+            logger.error('[AccountManager] Failed to load default account:', error.message);
             // Create empty account list - will fail on first request
             this.#accounts = [];
         }
@@ -158,10 +159,9 @@ export class AccountManager {
 
         for (const account of this.#accounts) {
             if (account.isRateLimited && account.rateLimitResetTime && account.rateLimitResetTime <= now) {
-                account.isRateLimited = false;
                 account.rateLimitResetTime = null;
                 cleared++;
-                console.log(`[AccountManager] Rate limit expired for: ${account.email}`);
+                logger.success(`[AccountManager] Rate limit expired for: ${account.email}`);
             }
         }
 
@@ -185,7 +185,7 @@ export class AccountManager {
             // So we clear both.
             account.rateLimitResetTime = null;
         }
-        console.log('[AccountManager] Reset all rate limits for optimistic retry');
+        logger.warn('[AccountManager] Reset all rate limits for optimistic retry');
     }
 
     /**
@@ -218,7 +218,7 @@ export class AccountManager {
 
                 const position = idx + 1;
                 const total = this.#accounts.length;
-                console.log(`[AccountManager] Using account: ${account.email} (${position}/${total})`);
+                logger.info(`[AccountManager] Using account: ${account.email} (${position}/${total})`);
 
                 // Persist the change (don't await to avoid blocking)
                 this.saveToDisk();
@@ -309,17 +309,32 @@ export class AccountManager {
             return { account: stickyAccount, waitMs: 0 };
         }
 
-        // Check if we should wait for current account
+        // Current account is rate-limited or invalid.
+        // CHECK IF OTHERS ARE AVAILABLE before deciding to wait.
+        // We prefer switching to an available neighbor over waiting for the sticky one,
+        // to avoid "erroring forever" / tight retry loops on short rate limits.
+        const available = this.getAvailableAccounts();
+        if (available.length > 0) {
+            // Found a free account! Switch immediately.
+            const nextAccount = this.pickNext();
+            if (nextAccount) {
+                logger.info(`[AccountManager] Switched to new account (failover): ${nextAccount.email}`);
+                return { account: nextAccount, waitMs: 0 };
+            }
+        }
+
+        // No other accounts available. Now checking if we should wait for current account.
         const waitInfo = this.shouldWaitForCurrentAccount();
         if (waitInfo.shouldWait) {
-            console.log(`[AccountManager] Waiting ${formatDuration(waitInfo.waitMs)} for sticky account: ${waitInfo.account.email}`);
+            logger.info(`[AccountManager] Waiting ${formatDuration(waitInfo.waitMs)} for sticky account: ${waitInfo.account.email}`);
             return { account: null, waitMs: waitInfo.waitMs };
         }
 
-        // Current account unavailable for too long, switch to next available
+        // Current account unavailable for too long/invalid, and no others available?
+        // pickNext will likely return null or loop, but we defer to standard logic.
         const nextAccount = this.pickNext();
         if (nextAccount) {
-            console.log(`[AccountManager] Switched to new account for cache: ${nextAccount.email}`);
+            logger.info(`[AccountManager] Switched to new account for cache: ${nextAccount.email}`);
         }
         return { account: nextAccount, waitMs: 0 };
     }
@@ -337,7 +352,7 @@ export class AccountManager {
         const cooldownMs = resetMs || this.#settings.cooldownDurationMs || DEFAULT_COOLDOWN_MS;
         account.rateLimitResetTime = Date.now() + cooldownMs;
 
-        console.log(
+        logger.warn(
             `[AccountManager] Rate limited: ${email}. Available in ${formatDuration(cooldownMs)}`
         );
 
@@ -357,13 +372,13 @@ export class AccountManager {
         account.invalidReason = reason;
         account.invalidAt = Date.now();
 
-        console.log(
+        logger.error(
             `[AccountManager] ⚠ Account INVALID: ${email}`
         );
-        console.log(
+        logger.error(
             `[AccountManager]   Reason: ${reason}`
         );
-        console.log(
+        logger.error(
             `[AccountManager]   Run 'npm run accounts' to re-authenticate this account`
         );
 
@@ -392,7 +407,7 @@ export class AccountManager {
         }
 
         if (soonestAccount) {
-            console.log(`[AccountManager] Shortest wait: ${formatDuration(minWait)} (account: ${soonestAccount.email})`);
+            logger.info(`[AccountManager] Shortest wait: ${formatDuration(minWait)} (account: ${soonestAccount.email})`);
         }
 
         return minWait === Infinity ? DEFAULT_COOLDOWN_MS : minWait;
@@ -425,9 +440,9 @@ export class AccountManager {
                     account.invalidReason = null;
                     await this.saveToDisk();
                 }
-                console.log(`[AccountManager] Refreshed OAuth token for: ${account.email}`);
+                logger.success(`[AccountManager] Refreshed OAuth token for: ${account.email}`);
             } catch (error) {
-                console.error(`[AccountManager] Failed to refresh token for ${account.email}:`, error.message);
+                logger.error(`[AccountManager] Failed to refresh token for ${account.email}:`, error.message);
                 // Mark account as invalid (credentials need re-auth)
                 this.markInvalid(account.email, error.message);
                 throw new Error(`AUTH_INVALID: ${account.email}: ${error.message}`);
@@ -508,11 +523,11 @@ export class AccountManager {
                     return data.cloudaicompanionProject.id;
                 }
             } catch (error) {
-                console.log(`[AccountManager] Project discovery failed at ${endpoint}:`, error.message);
+                logger.warn(`[AccountManager] Project discovery failed at ${endpoint}:`, error.message);
             }
         }
 
-        console.log(`[AccountManager] Using default project: ${DEFAULT_PROJECT_ID}`);
+        logger.info(`[AccountManager] Using default project: ${DEFAULT_PROJECT_ID}`);
         return DEFAULT_PROJECT_ID;
     }
 
@@ -571,7 +586,7 @@ export class AccountManager {
 
             await writeFile(this.#configPath, JSON.stringify(config, null, 2));
         } catch (error) {
-            console.error('[AccountManager] Failed to save config:', error.message);
+            logger.error('[AccountManager] Failed to save config:', error.message);
         }
     }
 

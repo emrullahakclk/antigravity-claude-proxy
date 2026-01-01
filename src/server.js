@@ -11,6 +11,7 @@ import { forceRefresh } from './token-extractor.js';
 import { REQUEST_BODY_LIMIT } from './constants.js';
 import { AccountManager } from './account-manager.js';
 import { formatDuration } from './utils/helpers.js';
+import { logger } from './utils/logger.js';
 
 const app = express();
 
@@ -36,11 +37,11 @@ async function ensureInitialized() {
             await accountManager.initialize();
             isInitialized = true;
             const status = accountManager.getStatus();
-            console.log(`[Server] Account pool initialized: ${status.summary}`);
+            logger.success(`[Server] Account pool initialized: ${status.summary}`);
         } catch (error) {
             initError = error;
             initPromise = null; // Allow retry on failure
-            console.error('[Server] Failed to initialize account manager:', error.message);
+            logger.error('[Server] Failed to initialize account manager:', error.message);
             throw error;
         }
     })();
@@ -98,7 +99,14 @@ function parseError(error) {
 
 // Request logging middleware
 app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    // Skip logging for event logging batch unless in debug mode
+    if (req.path === '/api/event_logging/batch') {
+        if (logger.isDebugEnabled) {
+             logger.debug(`[${req.method}] ${req.path}`);
+        }
+    } else {
+        logger.info(`[${req.method}] ${req.path}`);
+    }
     next();
 });
 
@@ -369,7 +377,7 @@ app.get('/v1/models', async (req, res) => {
         const models = await listModels(token);
         res.json(models);
     } catch (error) {
-        console.error('[API] Error listing models:', error);
+        logger.error('[API] Error listing models:', error);
         res.status(500).json({
             type: 'error',
             error: {
@@ -404,7 +412,7 @@ app.post('/v1/messages', async (req, res) => {
         // Optimistic Retry: If ALL accounts are rate-limited, reset them to force a fresh check.
         // If we have some available accounts, we try them first.
         if (accountManager.isAllRateLimited()) {
-            console.log('[Server] All accounts rate-limited. Resetting state for optimistic retry.');
+            logger.warn('[Server] All accounts rate-limited. Resetting state for optimistic retry.');
             accountManager.resetAllRateLimits();
         }
 
@@ -448,16 +456,16 @@ app.post('/v1/messages', async (req, res) => {
             temperature
         };
 
-        console.log(`[API] Request for model: ${request.model}, stream: ${!!stream}`);
+        logger.info(`[API] Request for model: ${request.model}, stream: ${!!stream}`);
 
         // Debug: Log message structure to diagnose tool_use/tool_result ordering
-        if (process.env.DEBUG) {
-            console.log('[API] Message structure:');
+        if (logger.isDebugEnabled) {
+            logger.debug('[API] Message structure:');
             messages.forEach((msg, i) => {
                 const contentTypes = Array.isArray(msg.content)
                     ? msg.content.map(c => c.type || 'text').join(', ')
                     : (typeof msg.content === 'string' ? 'text' : 'unknown');
-                console.log(`  [${i}] ${msg.role}: ${contentTypes}`);
+                logger.debug(`  [${i}] ${msg.role}: ${contentTypes}`);
             });
         }
 
@@ -481,7 +489,7 @@ app.post('/v1/messages', async (req, res) => {
                 res.end();
 
             } catch (streamError) {
-                console.error('[API] Stream error:', streamError);
+                logger.error('[API] Stream error:', streamError);
 
                 const { errorType, errorMessage } = parseError(streamError);
 
@@ -499,13 +507,13 @@ app.post('/v1/messages', async (req, res) => {
         }
 
     } catch (error) {
-        console.error('[API] Error:', error);
+        logger.error('[API] Error:', error);
 
         let { errorType, statusCode, errorMessage } = parseError(error);
 
         // For auth errors, try to refresh token
         if (errorType === 'authentication_error') {
-            console.log('[API] Token might be expired, attempting refresh...');
+            logger.warn('[API] Token might be expired, attempting refresh...');
             try {
                 accountManager.clearProjectCache();
                 accountManager.clearTokenCache();
@@ -516,11 +524,11 @@ app.post('/v1/messages', async (req, res) => {
             }
         }
 
-        console.log(`[API] Returning error response: ${statusCode} ${errorType} - ${errorMessage}`);
+        logger.warn(`[API] Returning error response: ${statusCode} ${errorType} - ${errorMessage}`);
 
         // Check if headers have already been sent (for streaming that failed mid-way)
         if (res.headersSent) {
-            console.log('[API] Headers already sent, writing error as SSE event');
+            logger.warn('[API] Headers already sent, writing error as SSE event');
             res.write(`event: error\ndata: ${JSON.stringify({
                 type: 'error',
                 error: { type: errorType, message: errorMessage }
@@ -542,6 +550,9 @@ app.post('/v1/messages', async (req, res) => {
  * Catch-all for unsupported endpoints
  */
 app.use('*', (req, res) => {
+    if (logger.isDebugEnabled) {
+        logger.debug(`[API] 404 Not Found: ${req.method} ${req.originalUrl}`);
+    }
     res.status(404).json({
         type: 'error',
         error: {

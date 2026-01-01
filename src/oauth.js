@@ -14,6 +14,7 @@ import {
     OAUTH_CONFIG,
     OAUTH_REDIRECT_URI
 } from './constants.js';
+import { logger } from './utils/logger.js';
 
 /**
  * Generate PKCE code verifier and challenge
@@ -156,7 +157,7 @@ export function startCallbackServer(expectedState, timeoutMs = 120000) {
         });
 
         server.listen(OAUTH_CONFIG.callbackPort, () => {
-            console.log(`[OAuth] Callback server listening on port ${OAUTH_CONFIG.callbackPort}`);
+            logger.info(`[OAuth] Callback server listening on port ${OAUTH_CONFIG.callbackPort}`);
         });
 
         // Timeout after specified duration
@@ -192,18 +193,18 @@ export async function exchangeCode(code, verifier) {
 
     if (!response.ok) {
         const error = await response.text();
-        console.error('[OAuth] Token exchange failed:', response.status, error);
+        logger.error(`[OAuth] Token exchange failed: ${response.status} ${error}`);
         throw new Error(`Token exchange failed: ${error}`);
     }
 
     const tokens = await response.json();
 
     if (!tokens.access_token) {
-        console.error('[OAuth] No access token in response:', tokens);
+        logger.error('[OAuth] No access token in response:', tokens);
         throw new Error('No access token received');
     }
 
-    console.log('[OAuth] Token exchange successful, access_token length:', tokens.access_token?.length);
+    logger.info(`[OAuth] Token exchange successful, access_token length: ${tokens.access_token?.length}`);
 
     return {
         accessToken: tokens.access_token,
@@ -259,7 +260,7 @@ export async function getUserEmail(accessToken) {
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error('[OAuth] getUserEmail failed:', response.status, errorText);
+        logger.error(`[OAuth] getUserEmail failed: ${response.status} ${errorText}`);
         throw new Error(`Failed to get user info: ${response.status}`);
     }
 
@@ -303,7 +304,7 @@ export async function discoverProjectId(accessToken) {
                 return data.cloudaicompanionProject.id;
             }
         } catch (error) {
-            console.log(`[OAuth] Project discovery failed at ${endpoint}:`, error.message);
+            logger.warn(`[OAuth] Project discovery failed at ${endpoint}:`, error.message);
         }
     }
 
