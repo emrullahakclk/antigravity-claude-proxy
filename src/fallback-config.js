@@ -1,21 +1,14 @@
 /**
  * Model Fallback Configuration
- * 
+ *
  * Defines fallback mappings for when a model's quota is exhausted across all accounts.
  * Enables graceful degradation to alternative models with similar capabilities.
  */
 
-/**
- * Model fallback mapping
- * Maps primary model ID to fallback model ID
- */
-export const MODEL_FALLBACK_MAP = {
-    'gemini-3-pro-high': 'claude-sonnet-4-5-thinking',
-    'gemini-3-pro-low': 'claude-sonnet-4-5',
-    'claude-opus-4-5-thinking': 'gemini-3-pro-high',
-    'claude-sonnet-4-5-thinking': 'gemini-3-pro-high',
-    'claude-sonnet-4-5': 'gemini-3-pro-low'
-};
+import { MODEL_FALLBACK_MAP } from './constants.js';
+
+// Re-export for convenience
+export { MODEL_FALLBACK_MAP };
 
 /**
  * Get fallback model for a given model ID
