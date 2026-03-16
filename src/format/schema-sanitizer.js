@@ -381,7 +381,7 @@ function moveConstraintsToDescription(schema) {
     if (Array.isArray(schema)) return schema.map(moveConstraintsToDescription);
 
     const CONSTRAINTS = ['minLength', 'maxLength', 'pattern', 'minimum', 'maximum',
-                         'minItems', 'maxItems', 'format'];
+        'minItems', 'maxItems', 'format'];
 
     let result = { ...schema };
 
@@ -586,6 +586,61 @@ function toGoogleType(type) {
 }
 
 /**
+ * Convert all enum values to strings.
+ * Google's Generative AI API requires enum values to be TYPE_STRING.
+ * This recursively finds all enum arrays and converts their values to strings.
+ *
+ * @param {Object} schema - Schema to process
+ * @returns {Object} Schema with all enum values converted to strings
+ */
+function convertEnumValuesToStrings(schema) {
+    if (!schema || typeof schema !== 'object') return schema;
+    if (Array.isArray(schema)) return schema.map(convertEnumValuesToStrings);
+
+    const result = { ...schema };
+
+    // Convert enum values to strings if present
+    if (Array.isArray(result.enum)) {
+        result.enum = result.enum.map(val => {
+            if (val === null) return 'null';
+            if (val === undefined) return 'undefined';
+            return String(val);
+        });
+        // Ensure type is string for enum properties
+        if (!result.type || result.type === 'integer' || result.type === 'number') {
+            result.type = 'string';
+        }
+    }
+
+    // Recursively process properties
+    if (result.properties && typeof result.properties === 'object') {
+        const newProps = {};
+        for (const [key, value] of Object.entries(result.properties)) {
+            newProps[key] = convertEnumValuesToStrings(value);
+        }
+        result.properties = newProps;
+    }
+
+    // Recursively process items
+    if (result.items) {
+        if (Array.isArray(result.items)) {
+            result.items = result.items.map(convertEnumValuesToStrings);
+        } else if (typeof result.items === 'object') {
+            result.items = convertEnumValuesToStrings(result.items);
+        }
+    }
+
+    // Recursively process anyOf/oneOf/allOf
+    for (const key of ['anyOf', 'oneOf', 'allOf']) {
+        if (Array.isArray(result[key])) {
+            result[key] = result[key].map(convertEnumValuesToStrings);
+        }
+    }
+
+    return result;
+}
+
+/**
  * Cleans JSON schema for Gemini API compatibility.
  * Uses a multi-phase pipeline matching opencode-antigravity-auth approach.
  *
@@ -596,8 +651,11 @@ export function cleanSchema(schema) {
     if (!schema || typeof schema !== 'object') return schema;
     if (Array.isArray(schema)) return schema.map(cleanSchema);
 
+    // Phase 0: Convert all enum values to strings (Google API requirement)
+    let result = convertEnumValuesToStrings(schema);
+
     // Phase 1: Convert $refs to hints
-    let result = convertRefsToHints(schema);
+    result = convertRefsToHints(result);
 
     // Phase 1b: Add enum hints (preserves enum info in description)
     result = addEnumHints(result);
